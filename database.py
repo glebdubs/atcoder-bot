@@ -11,8 +11,14 @@ DB_PATH = Path(__file__).parent / "bot_data.db"
 class GuildConfig:
     guild_id: int
     channel_id: int
-    role_id: int
+    codeforces_role_id: int
+    atcoder_role_id: int
     updated_at: int
+
+    def role_id_for_platform(self, platform: str) -> int:
+        if platform == "Codeforces":
+            return self.codeforces_role_id
+        return self.atcoder_role_id
 
 
 class Database:
@@ -27,12 +33,21 @@ class Database:
 
     def _init_db(self) -> None:
         with self._connect() as conn:
+            # Check if legacy schema exists (single role_id column) and migrate if needed
+            cols = [
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(guild_configs)").fetchall()
+            ]
+            if cols and "codeforces_role_id" not in cols:
+                conn.execute("DROP TABLE guild_configs")
+
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS guild_configs (
                     guild_id INTEGER PRIMARY KEY,
                     channel_id INTEGER NOT NULL,
-                    role_id INTEGER NOT NULL,
+                    codeforces_role_id INTEGER NOT NULL,
+                    atcoder_role_id INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL
                 )
                 """
@@ -49,19 +64,28 @@ class Database:
             )
             conn.commit()
 
-    def set_guild_config(self, guild_id: int, channel_id: int, role_id: int) -> None:
+    def set_guild_config(
+        self,
+        guild_id: int,
+        channel_id: int,
+        codeforces_role_id: int,
+        atcoder_role_id: int,
+    ) -> None:
         now = int(time.time())
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO guild_configs (guild_id, channel_id, role_id, updated_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO guild_configs (
+                    guild_id, channel_id, codeforces_role_id, atcoder_role_id, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(guild_id) DO UPDATE SET
                     channel_id = excluded.channel_id,
-                    role_id = excluded.role_id,
+                    codeforces_role_id = excluded.codeforces_role_id,
+                    atcoder_role_id = excluded.atcoder_role_id,
                     updated_at = excluded.updated_at
                 """,
-                (guild_id, channel_id, role_id, now),
+                (guild_id, channel_id, codeforces_role_id, atcoder_role_id, now),
             )
             conn.commit()
 
@@ -76,7 +100,11 @@ class Database:
     def get_guild_config(self, guild_id: int) -> Optional[GuildConfig]:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT guild_id, channel_id, role_id, updated_at FROM guild_configs WHERE guild_id = ?",
+                """
+                SELECT guild_id, channel_id, codeforces_role_id, atcoder_role_id, updated_at
+                FROM guild_configs
+                WHERE guild_id = ?
+                """,
                 (guild_id,),
             ).fetchone()
             if not row:
@@ -84,20 +112,25 @@ class Database:
             return GuildConfig(
                 guild_id=row["guild_id"],
                 channel_id=row["channel_id"],
-                role_id=row["role_id"],
+                codeforces_role_id=row["codeforces_role_id"],
+                atcoder_role_id=row["atcoder_role_id"],
                 updated_at=row["updated_at"],
             )
 
     def get_all_guild_configs(self) -> List[GuildConfig]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT guild_id, channel_id, role_id, updated_at FROM guild_configs"
+                """
+                SELECT guild_id, channel_id, codeforces_role_id, atcoder_role_id, updated_at
+                FROM guild_configs
+                """
             ).fetchall()
             return [
                 GuildConfig(
                     guild_id=r["guild_id"],
                     channel_id=r["channel_id"],
-                    role_id=r["role_id"],
+                    codeforces_role_id=r["codeforces_role_id"],
+                    atcoder_role_id=r["atcoder_role_id"],
                     updated_at=r["updated_at"],
                 )
                 for r in rows

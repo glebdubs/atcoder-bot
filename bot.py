@@ -3,7 +3,7 @@ import logging
 import os
 import time
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
 
 import certifi
 
@@ -27,9 +27,9 @@ logger = logging.getLogger("contest_bot")
 
 APPLICATION_ID = os.getenv("DISCORD_APPLICATION_ID", "911434130259050526")
 BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
-REMINDER_MINUTES_BEFORE = int(os.getenv("REMINDER_MINUTES_BEFORE", "180"))
+REMINDER_MINUTES_BEFORE = int(os.getenv("REMINDER_MINUTES_BEFORE", "60"))
 
-# Window around the target reminder time (e.g., 165m to 185m before start for a 180m target)
+# Window around the target reminder time (e.g., 45m to 65m before start for a 60m target)
 WINDOW_UPPER_SECONDS = (REMINDER_MINUTES_BEFORE + 5) * 60
 WINDOW_LOWER_SECONDS = max(60, (REMINDER_MINUTES_BEFORE - 15) * 60)
 
@@ -44,6 +44,7 @@ def build_contest_embed(contests: List[Contest], is_test: bool = False) -> disco
     first = contests[0]
     platform = first.platform
     color = PLATFORM_COLORS.get(platform, 0x5865F2)
+    platform_label = "AtCoder Beginner Contest" if platform == "AtCoder" else "Codeforces"
 
     title_prefix = "🧪 [TEST] " if is_test else "⏰ "
     if len(contests) == 1:
@@ -51,9 +52,13 @@ def build_contest_embed(contests: List[Contest], is_test: bool = False) -> disco
             title=f"{title_prefix}{first.name}",
             url=first.url,
             description=(
-                f"A **{platform}** competition is starting in **~3 hours**!"
-                if not is_test
-                else f"This is a test alert using the next upcoming **{platform}** competition."
+                f"An **{platform_label}** is starting in **~1 hour**!"
+                if platform == "AtCoder" and not is_test
+                else (
+                    f"A **{platform_label}** competition is starting in **~1 hour**!"
+                    if not is_test
+                    else f"This is a test alert using the next upcoming **{platform_label}**."
+                )
             ),
             color=color,
         )
@@ -83,7 +88,7 @@ def build_contest_embed(contests: List[Contest], is_test: bool = False) -> disco
         embed = discord.Embed(
             title=f"{title_prefix}{platform} Contests Starting Soon!",
             description=(
-                f"**{len(contests)} {platform}** divisions are starting in **~3 hours**!"
+                f"**{len(contests)} {platform}** divisions are starting in **~1 hour**!"
                 if not is_test
                 else f"This is a test alert for upcoming simultaneous **{platform}** divisions."
             ),
@@ -103,7 +108,7 @@ def build_contest_embed(contests: List[Contest], is_test: bool = False) -> disco
             inline=False,
         )
 
-    embed.set_footer(text=f"{platform} • 3-Hour Contest Reminder")
+    embed.set_footer(text=f"{platform_label} • 1-Hour Contest Reminder")
     return embed
 
 
@@ -198,22 +203,25 @@ class ContestBot(discord.Client):
             )
             return False
 
-        role_mention = f"<@&{config.role_id}>"
+        platform = contests[0].platform
+        role_id = config.role_id_for_platform(platform)
+        role_mention = f"<@&{role_id}>"
         embed = build_contest_embed(contests, is_test=is_test)
         allowed_mentions = discord.AllowedMentions(roles=True, everyone=True, users=False)
 
         try:
             await channel.send(
-                content=f"{role_mention} Competition starting in 3 hours!",
+                content=f"{role_mention} Competition starting in 1 hour!",
                 embed=embed,
                 allowed_mentions=allowed_mentions,
             )
             logger.info(
-                "Sent %sreminder for %s to guild %s (channel %s)",
+                "Sent %sreminder for %s to guild %s (channel %s, role %s)",
                 "TEST " if is_test else "",
                 [c.key for c in contests],
                 config.guild_id,
                 config.channel_id,
+                role_id,
             )
             return True
         except discord.DiscordException as exc:
@@ -231,17 +239,19 @@ bot = ContestBot()
 
 @bot.tree.command(
     name="setup",
-    description="Configure the channel and role to ping 3 hours before AtCoder & Codeforces contests.",
+    description="Configure the channel and roles to ping 1 hour before Codeforces & AtCoder Beginner Contests.",
 )
 @app_commands.describe(
     channel="The text channel where contest reminders will be posted",
-    role="The role to ping when a contest is 3 hours away",
+    codeforces_role="The role to ping 1 hour before Codeforces contests",
+    atcoder_role="The role to ping 1 hour before AtCoder Beginner Contests (ABC)",
 )
 @app_commands.default_permissions(manage_guild=True)
 async def setup_command(
     interaction: discord.Interaction,
     channel: discord.TextChannel,
-    role: discord.Role,
+    codeforces_role: discord.Role,
+    atcoder_role: discord.Role,
 ) -> None:
     if not interaction.guild_id:
         await interaction.response.send_message(
@@ -252,15 +262,16 @@ async def setup_command(
     bot.db.set_guild_config(
         guild_id=interaction.guild_id,
         channel_id=channel.id,
-        role_id=role.id,
+        codeforces_role_id=codeforces_role.id,
+        atcoder_role_id=atcoder_role.id,
     )
 
-    # Sync command tree to this guild as well for instant availability
     await interaction.response.send_message(
         f"✅ **Contest reminders configured!**\n"
         f"• **Channel:** {channel.mention}\n"
-        f"• **Role to Ping:** {role.mention}\n"
-        f"• **Timing:** 3 hours before every AtCoder & Codeforces competition\n\n"
+        f"• **Codeforces Role:** {codeforces_role.mention}\n"
+        f"• **AtCoder Beginner Contest Role:** {atcoder_role.mention}\n"
+        f"• **Timing:** 1 hour before each contest starts\n\n"
         f"*(Use `/test-ping` to send a test notification right now, or `/upcoming` to view scheduled contests.)*",
         ephemeral=True,
     )
@@ -280,7 +291,7 @@ async def status_command(interaction: discord.Interaction) -> None:
     config = bot.db.get_guild_config(interaction.guild_id)
     if not config:
         await interaction.response.send_message(
-            "⚠️ **Not configured yet.** Use `/setup` to pick a channel and role!",
+            "⚠️ **Not configured yet.** Use `/setup` to pick a channel and roles!",
             ephemeral=True,
         )
         return
@@ -290,10 +301,11 @@ async def status_command(interaction: discord.Interaction) -> None:
     if contests:
         nxt = contests[0]
         reminder_ts = nxt.start_time_unix - (REMINDER_MINUTES_BEFORE * 60)
+        role_id = config.role_id_for_platform(nxt.platform)
         next_contest_line = (
             f"**[{nxt.name}]({nxt.url})** ({nxt.platform})\n"
             f"• Starts: <t:{nxt.start_time_unix}:F> (<t:{nxt.start_time_unix}:R>)\n"
-            f"• 3h Ping Scheduled: <t:{reminder_ts}:R>"
+            f"• 1h Ping Scheduled: <t:{reminder_ts}:R> (will ping <@&{role_id}>)"
         )
 
     embed = discord.Embed(
@@ -301,14 +313,19 @@ async def status_command(interaction: discord.Interaction) -> None:
         color=0x57F287,
     )
     embed.add_field(name="Channel", value=f"<#{config.channel_id}>", inline=True)
-    embed.add_field(name="Role to Ping", value=f"<@&{config.role_id}>", inline=True)
+    embed.add_field(
+        name="Codeforces Role", value=f"<@&{config.codeforces_role_id}>", inline=True
+    )
+    embed.add_field(
+        name="AtCoder (ABC) Role", value=f"<@&{config.atcoder_role_id}>", inline=True
+    )
     embed.add_field(name="Next Contest", value=next_contest_line, inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 @bot.tree.command(
     name="upcoming",
-    description="Show upcoming AtCoder and Codeforces competitions.",
+    description="Show upcoming Codeforces and AtCoder Beginner Contests.",
 )
 @app_commands.describe(limit="Number of upcoming contests to show (1-15, default 8)")
 async def upcoming_command(
@@ -320,19 +337,21 @@ async def upcoming_command(
     contests = await bot.fetcher.get_upcoming_contests()
 
     if not contests:
-        await interaction.followup.send("No upcoming AtCoder or Codeforces contests found right now.")
+        await interaction.followup.send(
+            "No upcoming Codeforces or AtCoder Beginner Contests found right now."
+        )
         return
 
     lines: List[str] = []
     for c in contests[:count]:
-        badge = "🟦 **CF**" if c.platform == "Codeforces" else "⬛ **AC**"
+        badge = "🟦 **CF**" if c.platform == "Codeforces" else "⬛ **ABC**"
         lines.append(
             f"{badge} • **[{c.name}]({c.url})**\n"
             f"└ Starts <t:{c.start_time_unix}:F> (<t:{c.start_time_unix}:R>) • Duration: `{c.formatted_duration}`"
         )
 
     embed = discord.Embed(
-        title="📅 Upcoming AtCoder & Codeforces Contests",
+        title="📅 Upcoming Codeforces & AtCoder Beginner Contests",
         description="\n\n".join(lines),
         color=0x5865F2,
     )
@@ -344,8 +363,14 @@ async def upcoming_command(
     name="test-ping",
     description="Send a test contest reminder to the configured channel and role right now.",
 )
+@app_commands.describe(
+    platform="Which platform's role to test (Codeforces or AtCoder). Defaults to the next contest's platform."
+)
 @app_commands.default_permissions(manage_guild=True)
-async def test_ping_command(interaction: discord.Interaction) -> None:
+async def test_ping_command(
+    interaction: discord.Interaction,
+    platform: Optional[Literal["Codeforces", "AtCoder"]] = None,
+) -> None:
     if not interaction.guild_id:
         await interaction.response.send_message(
             "This command can only be used inside a server.", ephemeral=True
@@ -355,32 +380,44 @@ async def test_ping_command(interaction: discord.Interaction) -> None:
     config = bot.db.get_guild_config(interaction.guild_id)
     if not config:
         await interaction.response.send_message(
-            "⚠️ Please run `/setup` first to choose a channel and role.",
+            "⚠️ Please run `/setup` first to choose a channel and roles.",
             ephemeral=True,
         )
         return
 
     await interaction.response.defer(ephemeral=True)
     contests = await bot.fetcher.get_upcoming_contests()
+    if platform:
+        contests = [c for c in contests if c.platform == platform]
+
     if not contests:
-        # Fallback sample contest if offline
+        chosen_platform = platform or "AtCoder"
         sample = Contest(
-            key="ac:sample",
-            platform="AtCoder",
-            name="AtCoder Beginner Contest (Sample Test)",
-            url="https://atcoder.jp/contests/",
-            start_time_unix=int(time.time()) + 10800,
-            duration_seconds=6000,
-            rated_range=" - 1999",
+            key=f"sample:{chosen_platform.lower()}",
+            platform=chosen_platform,
+            name=(
+                "AtCoder Beginner Contest (Sample Test)"
+                if chosen_platform == "AtCoder"
+                else "Codeforces Round (Div. 2) (Sample Test)"
+            ),
+            url=(
+                "https://atcoder.jp/contests/"
+                if chosen_platform == "AtCoder"
+                else "https://codeforces.com/contests"
+            ),
+            start_time_unix=int(time.time()) + 3600,
+            duration_seconds=6000 if chosen_platform == "AtCoder" else 7200,
+            rated_range=" - 1999" if chosen_platform == "AtCoder" else None,
         )
         target_contests = [sample]
     else:
         target_contests = [contests[0]]
 
+    role_id = config.role_id_for_platform(target_contests[0].platform)
     ok = await bot._send_reminder(config, target_contests, is_test=True)
     if ok:
         await interaction.followup.send(
-            f"✅ Sent a test reminder to <#{config.channel_id}> pinging <@&{config.role_id}>!",
+            f"✅ Sent a **{target_contests[0].platform}** test reminder to <#{config.channel_id}> pinging <@&{role_id}>!",
             ephemeral=True,
         )
     else:

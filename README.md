@@ -1,6 +1,6 @@
-# AtCoder & Codeforces 3-Hour Discord Reminder Bot
+# Codeforces & AtCoder Beginner Contest 1-Hour Discord Reminder Bot
 
-A multi-server Discord bot that automatically pings a configured role **3 hours before** every upcoming **AtCoder** and **Codeforces** competition.
+A multi-server Discord bot that automatically pings separate configured roles **1 hour before** every upcoming **Codeforces** contest and **AtCoder Beginner Contest (ABC)**.
 
 ---
 
@@ -28,8 +28,6 @@ Click this pre-configured OAuth2 link (using your Application ID `91143413025905
 
 ## 3. Run the Bot
 
-A Python virtual environment (`.venv`) is already set up with all dependencies installed. Run:
-
 ```bash
 python3 -m venv .venv
 ./.venv/bin/pip install -r requirements.txt
@@ -42,13 +40,13 @@ python3 -m venv .venv
 
 Once the bot is online in your servers, run:
 
-- **`/setup channel:#announcements role:@CompetitiveProgrammers`**
-  Sets the channel and role to ping 3 hours before every AtCoder & Codeforces contest in that server.
-- **`/test-ping`**
-  Immediately sends a test alert to your configured channel & role using the next upcoming contest so you can verify permissions.
+- **`/setup channel:#announcements codeforces_role:@Codeforces atcoder_role:@AtCoderABC`**
+  Sets the announcement channel and the two separate roles to ping 1 hour before Codeforces contests and AtCoder Beginner Contests (ABCs).
+- **`/test-ping [platform: Codeforces | AtCoder]`**
+  Immediately sends a test alert to your configured channel & corresponding role so you can verify permissions.
 - **`/upcoming`**
-  Displays the next upcoming AtCoder and Codeforces contests with local start times and live countdowns.
+  Displays the next upcoming Codeforces contests and AtCoder Beginner Contests with local start times and live countdowns.
 - **`/status`**
-  Shows the current server's configured channel, role, and when the next 3-hour ping will fire.
+  Shows the current server's configured channel, both roles, and when the next 1-hour ping will fire.
 - **`/disable`**
   Turns off reminders in the current server.

@@ -127,6 +127,13 @@ def _parse_atcoder_html(html: str) -> List[Contest]:
         name = link_tag.text.strip()
         url = f"https://atcoder.jp{href}" if href.startswith("/") else href
 
+        # Only include AtCoder Beginner Contests (ABC)
+        if not (
+            contest_slug.lower().startswith("abc")
+            or "beginner contest" in name.lower()
+        ):
+            continue
+
         # 3. Duration (HH:MM)
         duration_text = cols[2].text.strip()
         duration_seconds = 0
